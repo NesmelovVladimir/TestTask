@@ -9,6 +9,7 @@ import com.example.test.repository.UserRepository;
 import com.example.test.websocket.WebSocketSessionManager;
 import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -41,7 +42,7 @@ public class TaskService {
     }
 
 
-    // Принимает username, внутри находит ID пользователя
+    // 1. Только создаёт задачу, не запускает обработку
     public TaskEntity createTask(String username, String payload) {
         UserEntity user = userRepository.findById(UUID.fromString(username))
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -54,32 +55,45 @@ public class TaskService {
         task.setProgress(0);
         task = taskRepository.save(task);
 
-        final String taskId = task.getId();
-        CompletableFuture.runAsync(() -> safeProcess(taskId), taskExecutor)
-                .exceptionally(ex -> {
-                    // Этот блок сработает, только если safeProcess не поймал исключение сам
-                    // Подстраховка: переведём задачу в FAILED, если что-то пошло не так
-                    TaskEntity t = taskRepository.findById(taskId).orElse(null);
-                    if (t != null && t.getStatus() != TaskStatus.COMPLETED && t.getStatus() != TaskStatus.FAILED) {
-                        t.setStatus(TaskStatus.FAILED);
-                        t.setResult("Internal error: " + ex.getMessage());
-                        t.setCompletedAt(LocalDateTime.now());
-                        taskRepository.save(t);
-                        sendUpdate(t);
-                    }
-                    return null;
-                });
+        // Отправляем начальное состояние через WebSocket
+        sendUpdate(task);
         return task;
     }
 
+    // 2. Планировщик: каждые 1 секунду забирает до 5 задач и запускает их
+    @Scheduled(fixedDelay = 1000)
     @Transactional
-    public void safeProcess(String taskId) {
-        TaskEntity task = taskRepository.findById(taskId).orElseThrow();
-        try {
+    public void processPendingTasks() {
+        int batchSize = 5;  // сколько задач брать за один раз
+        List<TaskEntity> pendingTasks = taskRepository.findPendingTasksForProcessing(batchSize);
+
+        for (TaskEntity task : pendingTasks) {
             task.setStatus(TaskStatus.PROCESSING);
             taskRepository.save(task);
             sendUpdate(task);
 
+            final String taskId = task.getId();
+            CompletableFuture.runAsync(() -> safeProcess(taskId), taskExecutor)
+                    .exceptionally(ex -> {
+                        // Если safeProcess не смог поймать ошибку – переводим в FAILED
+                        TaskEntity t = taskRepository.findById(taskId).orElse(null);
+                        if (t != null && t.getStatus() == TaskStatus.PROCESSING) {
+                            t.setStatus(TaskStatus.FAILED);
+                            t.setResult("Unexpected error: " + ex.getMessage());
+                            t.setCompletedAt(LocalDateTime.now());
+                            taskRepository.save(t);
+                            sendUpdate(t);
+                        }
+                        return null;
+                    });
+        }
+    }
+
+    // 3. Сама обработка задачи (вызывается в пуле)
+    @Transactional
+    public void safeProcess(String taskId) {
+        TaskEntity task = taskRepository.findById(taskId).orElseThrow();
+        try {
             int totalSteps = 20;
             long stepDurationMs = Math.max(50, (task.getPayload().length() * 1000L) / totalSteps);
 
