@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head><title>WS Tasks</title></head>
+<body>
+<h2>Авторизация</h2>
+<input id="username" placeholder="user"><input id="password" type="password" placeholder="password">
+<button onclick="login()">Войти</button>
+<h3>Токен: <span id="tokenDisplay"></span></h3>
+
+<h2>Создать задачу</h2>
+<input id="payload" value="hello world"><input id="duration" type="number" value="2">
+<button onclick="createTask()">Создать</button>
+
+<h2>Результаты</h2>
+<div id="log"></div>
+
+<script>
+  let token = '';
+
+  async function login() {
+    const resp = await fetch('http://localhost:8080/api/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        username: document.getElementById('username').value,
+        password: document.getElementById('password').value
+      })
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      token = data.token;
+      document.getElementById('tokenDisplay').textContent = token;
+      connectWebSocket();
+    } else alert('Ошибка авторизации');
+  }
+
+  function connectWebSocket() {
+    const ws = new WebSocket(`ws://localhost:8080/ws/tasks?token=${token}`);
+    ws.onmessage = (e) => {
+      const task = JSON.parse(e.data);
+      log(`Задача ${task.taskId}: статус=${task.status} результат=${task.result || ''}`);
+    };
+    ws.onopen = () => log('WebSocket подключён');
+  }
+
+  async function createTask() {
+    const resp = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`},
+      body: JSON.stringify({
+        payload: document.getElementById('payload').value,
+        durationSec: parseInt(document.getElementById('duration').value)
+      })
+    });
+    if (resp.ok) {
+      const task = await resp.json();
+      log(`Создана задача ${task.taskId}`);
+    }
+  }
+
+  function log(msg) {
+    document.getElementById('log').innerHTML += `<p>${msg}</p>`;
+  }
+</script>
+</body>
+</html>
