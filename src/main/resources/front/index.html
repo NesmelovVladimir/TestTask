@@ -1,65 +1,247 @@
 <!DOCTYPE html>
-<html>
-<head><title>WS Tasks</title></head>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Task Manager</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; }
+    .hidden { display: none !important; }
+    #authBlock, #workspace { border: 1px solid #ccc; padding: 20px; border-radius: 8px; }
+    #authBlock { width: 300px; margin: 50px auto; }
+    #authBlock input, #authBlock button { width: 100%; padding: 8px; margin: 5px 0; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    .progress-bar { width: 180px; background: #eee; border-radius: 4px; overflow: hidden; }
+    .progress-fill { height: 20px; background: #4caf50; width: 0%; transition: width 0.3s; }
+    .progress-text { font-size: 12px; margin-left: 5px; }
+    #logoutBtn { float: right; }
+    h2, h3 { margin-top: 0; }
+  </style>
+</head>
 <body>
-<h2>Авторизация</h2>
-<input id="username" placeholder="user"><input id="password" type="password" placeholder="password">
-<button onclick="login()">Войти</button>
-<h3>Токен: <span id="tokenDisplay"></span></h3>
 
-<h2>Создать задачу</h2>
-<input id="payload" value="hello world"><input id="duration" type="number" value="2">
-<button onclick="createTask()">Создать</button>
+<!-- Экран авторизации -->
+<div id="authBlock">
+  <h2>Вход в систему</h2>
+  <input type="text" id="username" placeholder="Логин (user)">
+  <input type="password" id="password" placeholder="Пароль (password)">
+  <button onclick="login()">Войти</button>
+  <p id="loginError" style="color:red;"></p>
+</div>
 
-<h2>Результаты</h2>
-<div id="log"></div>
+<!-- Рабочее пространство (скрыто до авторизации) -->
+<div id="workspace" class="hidden">
+  <button id="logoutBtn" onclick="logout()">Выйти</button>
+  <h2>Управление задачами</h2>
+  <p>Вы вошли как: <b id="currentUser"></b> | Токен: <code id="tokenDisplay"></code></p>
+
+  <h3>Создать новую задачу</h3>
+  <input type="text" id="payload" placeholder="Текст задачи" value="Тестовые данные">
+  <button onclick="createTask()">Создать</button>
+
+  <h3>Мои задачи</h3>
+  <table id="tasksTable">
+    <thead>
+    <tr>
+      <th>ID</th>
+      <th>Статус</th>
+      <th>Прогресс</th>
+      <th>Полезная нагрузка</th>
+      <th>Результат</th>
+    </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <p id="noTasks" style="display:none;">Нет активных задач.</p>
+</div>
 
 <script>
+  const BASE_URL = 'http://localhost:8080';
   let token = '';
+  let currentUser = '';
+  let ws = null;
 
+  // ------------------- Аутентификация -------------------
   async function login() {
-    const resp = await fetch('http://localhost:8080/api/auth/login', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        username: document.getElementById('username').value,
-        password: document.getElementById('password').value
-      })
-    });
-    if (resp.ok) {
-      const data = await resp.json();
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    const errorEl = document.getElementById('loginError');
+    errorEl.textContent = '';
+
+    if (!username || !password) {
+      errorEl.textContent = 'Заполните все поля';
+      return;
+    }
+
+    try {
+      const response = await fetch(`${BASE_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+
+      if (!response.ok) {
+        errorEl.textContent = 'Неверные учётные данные';
+        return;
+      }
+
+      const data = await response.json();
       token = data.token;
-      document.getElementById('tokenDisplay').textContent = token;
+      currentUser = username;
+      // Показываем рабочее пространство
+      document.getElementById('authBlock').classList.add('hidden');
+      document.getElementById('workspace').classList.remove('hidden');
+      document.getElementById('currentUser').textContent = currentUser;
+      document.getElementById('tokenDisplay').textContent = token.substring(0, 20) + '...';
+
+      // Подключаем WebSocket и загружаем задачи
       connectWebSocket();
-    } else alert('Ошибка авторизации');
-  }
-
-  function connectWebSocket() {
-    const ws = new WebSocket(`ws://localhost:8080/ws/tasks?token=${token}`);
-    ws.onmessage = (e) => {
-      const task = JSON.parse(e.data);
-      log(`Задача ${task.taskId}: статус=${task.status} результат=${task.result || ''}`);
-    };
-    ws.onopen = () => log('WebSocket подключён');
-  }
-
-  async function createTask() {
-    const resp = await fetch('/api/tasks', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`},
-      body: JSON.stringify({
-        payload: document.getElementById('payload').value,
-        durationSec: parseInt(document.getElementById('duration').value)
-      })
-    });
-    if (resp.ok) {
-      const task = await resp.json();
-      log(`Создана задача ${task.taskId}`);
+      await loadTasks();
+    } catch (err) {
+      errorEl.textContent = 'Ошибка сети: ' + err.message;
     }
   }
 
-  function log(msg) {
-    document.getElementById('log').innerHTML += `<p>${msg}</p>`;
+  function logout() {
+    if (ws) {
+      ws.close();
+      ws = null;
+    }
+    token = '';
+    currentUser = '';
+    document.getElementById('workspace').classList.add('hidden');
+    document.getElementById('authBlock').classList.remove('hidden');
+    document.getElementById('username').value = '';
+    document.getElementById('password').value = '';
+    document.querySelector('#tasksTable tbody').innerHTML = '';
+  }
+
+  // ------------------- WebSocket -------------------
+  function connectWebSocket() {
+    if (ws) ws.close();
+    ws = new WebSocket(`ws://localhost:8080/ws/tasks?token=${token}`);
+    ws.onopen = () => console.log('WebSocket подключён');
+    ws.onmessage = (event) => {
+      try {
+        const task = JSON.parse(event.data);
+        console.log('WS сообщение:', task);
+        updateTaskRow(task);
+      } catch (e) {
+        console.error('Ошибка парсинга WS:', e);
+      }
+    };
+    ws.onerror = (e) => console.error('WebSocket ошибка', e);
+    ws.onclose = () => console.log('WebSocket закрыт');
+  }
+
+  // ------------------- Загрузка задач -------------------
+  async function loadTasks() {
+    try {
+      const resp = await fetch(`${BASE_URL}/api/tasks`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!resp.ok) throw new Error('Ошибка загрузки');
+      const tasks = await resp.json();
+      const tbody = document.querySelector('#tasksTable tbody');
+      tbody.innerHTML = '';
+      if (tasks.length === 0) {
+        document.getElementById('noTasks').style.display = 'block';
+      } else {
+        document.getElementById('noTasks').style.display = 'none';
+        tasks.forEach(task => renderTaskRow(task));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  // ------------------- Создание задачи -------------------
+  async function createTask() {
+    const payload = document.getElementById('payload').value.trim();
+    if (!payload) return alert('Введите текст задачи');
+    try {
+      const resp = await fetch(`${BASE_URL}/api/tasks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ payload })
+      });
+      if (resp.ok) {
+        const task = await resp.json();
+        renderTaskRow(task);
+        document.getElementById('noTasks').style.display = 'none';
+        document.getElementById('payload').value = ''; // очищаем
+      } else {
+        alert('Ошибка создания задачи');
+      }
+    } catch (e) {
+      alert('Сеть: ' + e.message);
+    }
+  }
+
+  // ------------------- Отображение / обновление строки задачи -------------------
+  function renderTaskRow(task) {
+    const tbody = document.querySelector('#tasksTable tbody');
+    // Удаляем старую строку, если есть (чтобы избежать дублирования)
+    const existingRow = document.getElementById(`row-${task.id}`);
+    if (existingRow) existingRow.remove();
+
+    const row = document.createElement('tr');
+    row.id = `row-${task.id}`;
+    row.innerHTML = `
+                <td>${task.id}</td>
+                <td class="status">${task.status}</td>
+                <td>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="fill-${task.id}" style="width:${task.progress}%"></div>
+                    </div>
+                    <span class="progress-text" id="text-${task.id}">${task.progress}%</span>
+                </td>
+                <td>${escapeHtml(task.payload) || ''}</td>
+                <td class="result">${escapeHtml(task.result) || ''}</td>
+            `;
+    tbody.appendChild(row);
+  }
+
+  function updateTaskRow(task) {
+    const fill = document.getElementById(`fill-${task.id}`);
+    const text = document.getElementById(`text-${task.id}`);
+    const statusCell = document.querySelector(`#row-${task.id} .status`);
+    const resultCell = document.querySelector(`#row-${task.id} .result`);
+
+    if (!fill || !text || !statusCell || !resultCell) {
+      // Строки нет – добавляем новую (на случай если пришло обновление для ещё не отрисованной)
+      renderTaskRow(task);
+      return;
+    }
+
+    // Обновляем прогресс
+    fill.style.width = task.progress + '%';
+    text.textContent = task.progress + '%';
+    // Обновляем статус
+    statusCell.textContent = task.status;
+    // Обновляем результат, если он есть
+    if (task.result) {
+      resultCell.textContent = task.result;
+    }
+    // Если задача завершена, можно визуально подсветить
+    if (task.status === 'COMPLETED' || task.status === 'FAILED') {
+      fill.style.background = task.status === 'FAILED' ? '#f44336' : '#4caf50';
+    }
+  }
+
+  function escapeHtml(text) {
+    if (!text) return '';
+    const map = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
   }
 </script>
 </body>

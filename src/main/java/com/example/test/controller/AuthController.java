@@ -4,29 +4,42 @@ import com.example.test.dto.AuthRequest;
 import com.example.test.dto.AuthResponse;
 import com.example.test.security.jwt.JwtTokenProvider;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-
-import java.util.Map;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
+    private final UserDetailsService userDetailsService;
+    private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider tokenProvider;
 
-    // В реальном проекте – UserDetailsService
-    private final Map<String, String> users = Map.of("user", "password", "admin", "admin");
-
-    public AuthController(JwtTokenProvider tokenProvider) {
+    public AuthController(UserDetailsService userDetailsService,
+            PasswordEncoder passwordEncoder,
+            JwtTokenProvider tokenProvider) {
+        this.userDetailsService = userDetailsService;
+        this.passwordEncoder = passwordEncoder;
         this.tokenProvider = tokenProvider;
     }
 
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@RequestBody AuthRequest request) {
-        if (users.containsKey(request.getUsername()) &&
-                users.get(request.getUsername()).equals(request.getPassword())) {
-            String token = tokenProvider.createToken(request.getUsername());
-            return ResponseEntity.ok(new AuthResponse(token));
+        UserDetails userDetails;
+        try {
+            userDetails = userDetailsService.loadUserByUsername(request.getUsername());
+        } catch (UsernameNotFoundException _) {
+            return ResponseEntity.status(401).build();
         }
-        return ResponseEntity.status(401).build();
+        if (!passwordEncoder.matches(request.getPassword(), userDetails.getPassword())) {
+            return ResponseEntity.status(401).build();
+        }
+        String token = tokenProvider.createToken(userDetails.getUsername());
+        return ResponseEntity.ok(new AuthResponse(token));
     }
 }
