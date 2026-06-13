@@ -29,6 +29,8 @@ public class TaskService {
     private final ObjectMapper objectMapper;
     private final Executor taskExecutor;
 
+    private final Object schedulingLock = new Object();
+
     public TaskService(TaskRepository taskRepository,
             UserRepository userRepository,
             WebSocketSessionManager wsManager,
@@ -62,9 +64,15 @@ public class TaskService {
 
     // 2. Планировщик: каждые 1 секунду забирает до 5 задач и запускает их
     @Scheduled(fixedDelay = 1000)
-    @Transactional
     public void processPendingTasks() {
-        int batchSize = 5;  // сколько задач брать за один раз
+        synchronized (schedulingLock) {
+            doProcessPendingTasks();
+        }
+    }
+
+    @Transactional
+    public void doProcessPendingTasks() {
+        int batchSize = 5;
         List<TaskEntity> pendingTasks = taskRepository.findPendingTasksForProcessing(batchSize);
 
         for (TaskEntity task : pendingTasks) {
@@ -93,6 +101,10 @@ public class TaskService {
     @Transactional
     public void safeProcess(String taskId) {
         TaskEntity task = taskRepository.findById(taskId).orElseThrow();
+        if (task.getStatus() != TaskStatus.PROCESSING) {
+            // Уже обрабатывается или завершена – тихо выходим
+            return;
+        }
         try {
             int totalSteps = 20;
             long stepDurationMs = Math.max(50, (task.getPayload().length() * 1000L) / totalSteps);

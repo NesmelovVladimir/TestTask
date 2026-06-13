@@ -31,3 +31,5 @@ into
                   "password",
                   username)
 values('ad235e62-947f-4007-8fde-d310146c707b', '$2a$10$O4bu9B9nvc13CLF3fg3DRO6LcGgMLTH19JM46Nophqq27j24SV0x6', 'admin');
+
+CREATE INDEX idx_tasks_status_created ON tasks(status, created_at);
