@@ -2,8 +2,10 @@ package com.example.test.repository;
 
 import com.example.test.entity.UserEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
-import java.util.Optional;
 
-public interface UserRepository extends JpaRepository<UserEntity, String> {
+import java.util.Optional;
+import java.util.UUID;
+
+public interface UserRepository extends JpaRepository<UserEntity, UUID> {
     Optional<UserEntity> findByUsername(String username);
 }

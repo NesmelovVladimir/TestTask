@@ -43,7 +43,7 @@ public class TaskService {
 
     // Принимает username, внутри находит ID пользователя
     public TaskEntity createTask(String username, String payload) {
-        UserEntity user = userRepository.findByUsername(username)
+        UserEntity user = userRepository.findById(UUID.fromString(username))
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         TaskEntity task = new TaskEntity();

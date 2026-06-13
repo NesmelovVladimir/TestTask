@@ -1,5 +1,7 @@
 package com.example.test.security.jwt;
 
+import com.example.test.entity.UserEntity;
+import com.example.test.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -14,9 +16,11 @@ import java.util.List;
 
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtTokenProvider tokenProvider;
+    private final UserRepository userRepository;
 
-    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider) {
+    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider, UserRepository userRepository) {
         this.tokenProvider = tokenProvider;
+        this.userRepository = userRepository;
     }
 
     @Override
@@ -25,8 +29,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String token = resolveToken(request);
         if (token != null && tokenProvider.validateToken(token)) {
             String username = tokenProvider.getUsername(token);
+            UserEntity user = userRepository.findByUsername(username).orElse(null);
             UsernamePasswordAuthenticationToken auth =
-                    new UsernamePasswordAuthenticationToken(username, null, List.of());
+                    new UsernamePasswordAuthenticationToken(user.getId(), null, List.of());
             SecurityContextHolder.getContext().setAuthentication(auth);
         }
         chain.doFilter(request, response);
