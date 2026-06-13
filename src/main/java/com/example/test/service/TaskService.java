@@ -3,7 +3,9 @@ package com.example.test.service;
 import com.example.test.dto.TaskResponse;
 import com.example.test.dto.TaskStatus;
 import com.example.test.entity.TaskEntity;
+import com.example.test.entity.UserEntity;
 import com.example.test.repository.TaskRepository;
+import com.example.test.repository.UserRepository;
 import com.example.test.websocket.WebSocketSessionManager;
 import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -21,24 +23,32 @@ import java.util.stream.Collectors;
 public class TaskService {
 
     private final TaskRepository taskRepository;
+    private final UserRepository userRepository;
     private final WebSocketSessionManager wsManager;
     private final ObjectMapper objectMapper;
     private final Executor taskExecutor;
 
     public TaskService(TaskRepository taskRepository,
+            UserRepository userRepository,
             WebSocketSessionManager wsManager,
             ObjectMapper objectMapper,
             @Qualifier("taskExecutor") Executor taskExecutor) {
         this.taskRepository = taskRepository;
+        this.userRepository = userRepository;
         this.wsManager = wsManager;
         this.objectMapper = objectMapper;
         this.taskExecutor = taskExecutor;
     }
 
-    public TaskEntity createTask(String userId, String payload) {
+
+    // Принимает username, внутри находит ID пользователя
+    public TaskEntity createTask(String username, String payload) {
+        UserEntity user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
         TaskEntity task = new TaskEntity();
         task.setId(UUID.randomUUID().toString().substring(0, 8));
-        task.setUserId(userId);
+        task.setUserId(user.getId());
         task.setStatus(TaskStatus.CREATED);
         task.setPayload(payload);
         task.setProgress(0);
@@ -111,11 +121,11 @@ public class TaskService {
                 task.getCreatedAt(), task.getCompletedAt()
         );
         String json = objectMapper.writeValueAsString(response);
-        wsManager.sendToUser(task.getUserId(), json);
+        wsManager.sendToUser(task.getUserId().toString(), json);
     }
 
     public List<TaskResponse> getUserTasks(String userId) {
-        return taskRepository.findByUserId(userId).stream()
+        return taskRepository.findByUserId(UUID.fromString(userId)).stream()
                 .map(t -> new TaskResponse(
                         t.getId(), t.getStatus(), t.getProgress(),
                         t.getPayload(), t.getResult(),

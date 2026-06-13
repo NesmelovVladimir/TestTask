@@ -6,33 +6,35 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Entity
 @Table(name = "tasks")
 @Getter @Setter
 public class TaskEntity {
     @Id
+    @Column(name = "id", length = 8)
     private String id;
 
-    @Column(nullable = false)
-    private String userId;
+    @Column(name = "user_id", nullable = false)
+    private UUID userId;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "status")
     private TaskStatus status;
 
-    @Column(length = 1000)
+    @Column(name = "payload", length = 1000)
     private String payload;
 
-    @Column(length = 4000)
+    @Column(name = "result", length = 4000)
     private String result;
 
-    private int progress;  // 0-100
+    @Column(name = "progress")
+    private int progress;
 
+    @Column(name = "created_at")
     private LocalDateTime createdAt;
-    private LocalDateTime completedAt;
 
-    @PrePersist
-    void onCreate() {
-        createdAt = LocalDateTime.now();
-    }
+    @Column(name = "completed_at")
+    private LocalDateTime completedAt;
 }
