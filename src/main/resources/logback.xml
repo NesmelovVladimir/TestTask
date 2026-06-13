@@ -1,0 +1,40 @@
+<configuration scan="true">
+  <conversionRule conversionWord="clr" class="org.springframework.boot.logging.logback.ColorConverter"/>
+  <conversionRule conversionWord="wex"
+    class="org.springframework.boot.logging.logback.WhitespaceThrowableProxyConverter"/>
+  <conversionRule conversionWord="wEx"
+    class="org.springframework.boot.logging.logback.ExtendedWhitespaceThrowableProxyConverter"/>
+  <property name="CONSOLE_LOG_PATTERN"
+    value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(%5p) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%18.18t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n%wEx"/>
+  <property name="FILE_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %5p ${PID:- } --- [%18.18t] %-40.40logger{39} : %m%n%wEx"/>
+  <statusListener class="ch.qos.logback.core.status.NopStatusListener"/>
+
+  <appender class="ch.qos.logback.core.ConsoleAppender" name="STDOUT">
+    <encoder>
+      <charset>UTF-8</charset>
+      <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+    </encoder>
+  </appender>
+
+  <appender class="ch.qos.logback.core.rolling.RollingFileAppender" name="FILE">
+    <encoder>
+      <charset>UTF-8</charset>
+      <pattern>${FILE_PATTERN}</pattern>
+    </encoder>
+    <file>./logs/TestTask.log</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+      <fileNamePattern>./logs/TestTask.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+      <maxHistory>15</maxHistory>
+      <maxFileSize>20MB</maxFileSize>
+      <totalSizeCap>500MB</totalSizeCap>
+      <cleanHistoryOnStart>true</cleanHistoryOnStart>
+    </rollingPolicy>
+  </appender>
+
+  <logger level="${LOG_LEVEL:-info}" name="com.example.test"/>
+
+  <root level="INFO">
+    <appender-ref ref="STDOUT"/>
+    <appender-ref ref="FILE"/>
+  </root>
+</configuration>

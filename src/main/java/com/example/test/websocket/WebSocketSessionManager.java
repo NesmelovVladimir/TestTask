@@ -11,9 +11,11 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class WebSocketSessionManager {
     private final ConcurrentHashMap<String, Set<WebSocketSession>> userSessions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<WebSocketSession, Object> sessionLocks = new ConcurrentHashMap<>();
 
     public void registerSession(String userId, WebSocketSession session) {
         userSessions.computeIfAbsent(userId, k -> ConcurrentHashMap.newKeySet()).add(session);
+        sessionLocks.putIfAbsent(session, new Object());
     }
 
     public void removeSession(String userId, WebSocketSession session) {
@@ -24,6 +26,7 @@ public class WebSocketSessionManager {
                 userSessions.remove(userId);
             }
         }
+        sessionLocks.remove(session);
     }
 
     public void sendToUser(String userId, String message) {
@@ -31,11 +34,16 @@ public class WebSocketSessionManager {
         if (sessions == null) return;
         for (WebSocketSession session : sessions) {
             if (session.isOpen()) {
-                try {
-                    session.sendMessage(new TextMessage(message));
-                } catch (IOException _) {
-                    // удаляем сломанную сессию
-                    sessions.remove(session);
+                Object lock = sessionLocks.get(session);
+                if (lock != null) {
+                    synchronized (lock) {
+                        try {
+                            session.sendMessage(new TextMessage(message));
+                        } catch (IOException _) {
+                            sessions.remove(session);
+                            sessionLocks.remove(session);
+                        }
+                    }
                 }
             }
         }

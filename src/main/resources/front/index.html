@@ -184,24 +184,24 @@
   // ------------------- Отображение / обновление строки задачи -------------------
   function renderTaskRow(task) {
     const tbody = document.querySelector('#tasksTable tbody');
-    // Удаляем старую строку, если есть (чтобы избежать дублирования)
     const existingRow = document.getElementById(`row-${task.id}`);
     if (existingRow) existingRow.remove();
 
     const row = document.createElement('tr');
     row.id = `row-${task.id}`;
+    const progressColor = getColorByStatus(task.status, task.progress);
     row.innerHTML = `
-                <td>${task.id}</td>
-                <td class="status">${task.status}</td>
-                <td>
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="fill-${task.id}" style="width:${task.progress}%"></div>
-                    </div>
-                    <span class="progress-text" id="text-${task.id}">${task.progress}%</span>
-                </td>
-                <td>${escapeHtml(task.payload) || ''}</td>
-                <td class="result">${escapeHtml(task.result) || ''}</td>
-            `;
+        <td>${task.id}</td>
+        <td class="status">${task.status}</td>
+        <td>
+            <div class="progress-bar">
+                <div class="progress-fill" id="fill-${task.id}" style="width:${task.progress}%; background:${progressColor};"></div>
+            </div>
+            <span class="progress-text" id="text-${task.id}">${task.progress}%</span>
+        </td>
+        <td>${escapeHtml(task.payload) || ''}</td>
+        <td class="result">${escapeHtml(task.result) || ''}</td>
+    `;
     tbody.appendChild(row);
   }
 
@@ -212,24 +212,24 @@
     const resultCell = document.querySelector(`#row-${task.id} .result`);
 
     if (!fill || !text || !statusCell || !resultCell) {
-      // Строки нет – добавляем новую (на случай если пришло обновление для ещё не отрисованной)
       renderTaskRow(task);
       return;
     }
 
-    // Обновляем прогресс
     fill.style.width = task.progress + '%';
+    fill.style.background = getColorByStatus(task.status, task.progress);
     text.textContent = task.progress + '%';
-    // Обновляем статус
     statusCell.textContent = task.status;
-    // Обновляем результат, если он есть
     if (task.result) {
       resultCell.textContent = task.result;
     }
-    // Если задача завершена, можно визуально подсветить
-    if (task.status === 'COMPLETED' || task.status === 'FAILED') {
-      fill.style.background = task.status === 'FAILED' ? '#f44336' : '#4caf50';
-    }
+  }
+
+  function getColorByStatus(status, progress) {
+    if (status === 'FAILED') return '#f44336';          // красный
+    if (status === 'COMPLETED') return '#4caf50';       // зелёный
+    // в процессе или создана — градиент от голубого к синему
+    return `linear-gradient(90deg, #2196F3, #0D47A1)`;
   }
 
   function escapeHtml(text) {
