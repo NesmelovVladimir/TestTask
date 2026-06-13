@@ -5,6 +5,7 @@ import com.example.test.dto.TaskStatus;
 import com.example.test.entity.TaskEntity;
 import com.example.test.repository.TaskRepository;
 import com.example.test.websocket.WebSocketSessionManager;
+import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -41,45 +42,66 @@ public class TaskService {
         task.setStatus(TaskStatus.CREATED);
         task.setPayload(payload);
         task.setProgress(0);
-        taskRepository.save(task);
+        task = taskRepository.save(task);
 
-        // запуск асинхронной обработки
-        CompletableFuture.runAsync(() -> process(task.getId()), taskExecutor);
+        final String taskId = task.getId();
+        CompletableFuture.runAsync(() -> safeProcess(taskId), taskExecutor)
+                .exceptionally(ex -> {
+                    // Этот блок сработает, только если safeProcess не поймал исключение сам
+                    // Подстраховка: переведём задачу в FAILED, если что-то пошло не так
+                    TaskEntity t = taskRepository.findById(taskId).orElse(null);
+                    if (t != null && t.getStatus() != TaskStatus.COMPLETED && t.getStatus() != TaskStatus.FAILED) {
+                        t.setStatus(TaskStatus.FAILED);
+                        t.setResult("Internal error: " + ex.getMessage());
+                        t.setCompletedAt(LocalDateTime.now());
+                        taskRepository.save(t);
+                        sendUpdate(t);
+                    }
+                    return null;
+                });
         return task;
     }
 
-    private void process(String taskId) {
+    @Transactional
+    public void safeProcess(String taskId) {
         TaskEntity task = taskRepository.findById(taskId).orElseThrow();
-        task.setStatus(TaskStatus.PROCESSING);
-        taskRepository.save(task);
-        sendUpdate(task);
+        try {
+            task.setStatus(TaskStatus.PROCESSING);
+            taskRepository.save(task);
+            sendUpdate(task);
 
-        int totalSteps = 20; // эмулируем 20 шагов прогресса
-        long stepDurationMs = (task.getPayload().length() * 1000L) / totalSteps; // длительность зависит от длины payload
+            int totalSteps = 20;
+            long stepDurationMs = Math.max(50, (task.getPayload().length() * 1000L) / totalSteps);
 
-        for (int i = 1; i <= totalSteps; i++) {
-            try {
+            for (int i = 1; i <= totalSteps; i++) {
                 Thread.sleep(stepDurationMs);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                task.setStatus(TaskStatus.FAILED);
-                task.setResult("Interrupted");
+                int progress = (i * 100) / totalSteps;
+                task.setProgress(progress);
                 taskRepository.save(task);
                 sendUpdate(task);
-                return;
             }
-            int progress = (i * 100) / totalSteps;
-            task.setProgress(progress);
+
+            task.setStatus(TaskStatus.COMPLETED);
+            task.setResult("Processed: " + task.getPayload().toUpperCase());
+            task.setCompletedAt(LocalDateTime.now());
+            task.setProgress(100);
+            taskRepository.save(task);
+            sendUpdate(task);
+
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+            task.setStatus(TaskStatus.FAILED);
+            task.setResult("Interrupted");
+            task.setCompletedAt(LocalDateTime.now());
+            taskRepository.save(task);
+            sendUpdate(task);
+        } catch (Exception e) {
+            task.setStatus(TaskStatus.FAILED);
+            task.setResult("Error: " + e.getMessage());
+            task.setCompletedAt(LocalDateTime.now());
             taskRepository.save(task);
             sendUpdate(task);
         }
-
-        task.setStatus(TaskStatus.COMPLETED);
-        task.setResult("Processed: " + task.getPayload().toUpperCase());
-        task.setCompletedAt(LocalDateTime.now());
-        task.setProgress(100);
-        taskRepository.save(task);
-        sendUpdate(task);
     }
 
     private void sendUpdate(TaskEntity task) {
