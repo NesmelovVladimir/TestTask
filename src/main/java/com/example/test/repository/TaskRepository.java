@@ -1,17 +1,16 @@
 package com.example.test.repository;
 
-import com.example.test.entity.TaskEntity;
+import com.example.test.dto.TaskStatus;
+import com.example.test.entity.Task;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.UUID;
 
-public interface TaskRepository extends JpaRepository<TaskEntity, String> {
-    List<TaskEntity> findByUserId(UUID userId);
+public interface TaskRepository extends JpaRepository<Task, String> {
 
-    // Выбрать старейшие задачи со статусом CREATED, ограничить количество
-    @Query(value = "SELECT * FROM tasks WHERE status = 'CREATED' ORDER BY created_at LIMIT :limit FOR UPDATE", nativeQuery = true)
-    List<TaskEntity> findPendingTasksForProcessing(@Param("limit") int limit);
+    List<Task> findByUserId(UUID userId);
+
+    List<Task> findAllByStatusOrderByCreatedAt(TaskStatus status, Pageable pageable);
 }

@@ -11,7 +11,7 @@ import java.util.UUID;
 @Entity
 @Table(name = "tasks")
 @Getter @Setter
-public class TaskEntity {
+public class Task {
     @Id
     @Column(name = "id", length = 8)
     private String id;

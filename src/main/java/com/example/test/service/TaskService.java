@@ -3,13 +3,15 @@ package com.example.test.service;
 import com.example.test.dto.TaskResponse;
 import com.example.test.dto.TaskStatus;
 import com.example.test.dto.UserDTO;
-import com.example.test.entity.TaskEntity;
+import com.example.test.entity.Task;
 import com.example.test.repository.TaskRepository;
 import com.example.test.websocket.WebSocketSessionManager;
 import jakarta.annotation.Resource;
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -17,12 +19,11 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
-import java.util.stream.Collectors;
 
 /**
  * Сервис для работы с задачами
  */
+@Slf4j
 @RequiredArgsConstructor
 @Service
 public class TaskService {
@@ -31,9 +32,16 @@ public class TaskService {
     private final WebSocketSessionManager wsManager;
     private final ObjectMapper objectMapper;
     @Resource(name = "taskExecutor")
-    private final Executor taskExecutor;
+    private final ThreadPoolTaskExecutor taskExecutor;
 
-    private final Object schedulingLock = new Object();
+    /**
+     * Задача по расписанию, которая вытаскивает новые задачи от пользователей и запускает их в фоне. Данные
+     * пользователям отправляются через WebSocket
+     */
+    @Scheduled(fixedDelay = 1000)
+    public void processPendingTasks() {
+        doProcessPendingTasks();
+    }
 
     /**
      * Отправить задачу пользователя в очередь на выполнение
@@ -41,8 +49,8 @@ public class TaskService {
      * @param payload Нагрузка для задачи
      * @return Новая задача
      */
-    public TaskEntity createTask(UserDTO user, String payload) {
-        TaskEntity task = new TaskEntity();
+    public Task createTask(UserDTO user, String payload) {
+        Task task = new Task();
         task.setId(UUID.randomUUID().toString().substring(0, 8));
         task.setUserId(user.getId());
         task.setStatus(TaskStatus.CREATED);
@@ -55,45 +63,48 @@ public class TaskService {
         return task;
     }
 
-    // 2. Планировщик: каждые 1 секунду забирает до 5 задач и запускает их
-    @Scheduled(fixedDelay = 1000)
-    public void processPendingTasks() {
-        synchronized (schedulingLock) {
-            doProcessPendingTasks();
-        }
+    /**
+     * Получить список задач по идентификатору пользователя
+     * @param userId Идентификатор пользователя
+     * @return Список задач
+     */
+    public List<TaskResponse> getUserTasks(UUID userId) {
+        return taskRepository.findByUserId(userId).stream()
+                .map(t -> new TaskResponse(
+                        t.getId(), t.getStatus(), t.getProgress(),
+                        t.getPayload(), t.getResult(),
+                        t.getCreatedAt(), t.getCompletedAt()))
+                .toList();
     }
 
-    @Transactional
+    /**
+     * Получение и запуск задач в фоне
+     */
     public void doProcessPendingTasks() {
-        int batchSize = 5;
-        List<TaskEntity> pendingTasks = taskRepository.findPendingTasksForProcessing(batchSize);
+        try {
+            List<Task> pendingTasks = taskRepository.findAllByStatusOrderByCreatedAt(TaskStatus.CREATED,
+                    Pageable.ofSize(5));
 
-        for (TaskEntity task : pendingTasks) {
-            task.setStatus(TaskStatus.PROCESSING);
-            taskRepository.save(task);
-            sendUpdate(task);
-
-            final String taskId = task.getId();
-            CompletableFuture.runAsync(() -> safeProcess(taskId), taskExecutor)
-                    .exceptionally(ex -> {
-                        // Если safeProcess не смог поймать ошибку – переводим в FAILED
-                        TaskEntity t = taskRepository.findById(taskId).orElse(null);
-                        if (t != null && t.getStatus() == TaskStatus.PROCESSING) {
-                            t.setStatus(TaskStatus.FAILED);
-                            t.setResult("Unexpected error: " + ex.getMessage());
-                            t.setCompletedAt(LocalDateTime.now());
-                            taskRepository.save(t);
-                            sendUpdate(t);
-                        }
-                        return null;
-                    });
+            log.info("{} tasks pending", pendingTasks.size());
+            CompletableFuture<?>[] tasks = pendingTasks.stream()
+                    .map(task -> {
+                        task.setStatus(TaskStatus.PROCESSING);
+                        taskRepository.save(task);
+                        sendUpdate(task);
+                        return CompletableFuture.runAsync(() -> processTask(task), taskExecutor);
+                    })
+                    .toArray(CompletableFuture[]::new);
+            CompletableFuture.allOf(tasks);
+        } catch (Exception e) {
+            log.error("Start new tasks error", e);
         }
     }
 
-    // 3. Сама обработка задачи (вызывается в пуле)
-    @Transactional
-    public void safeProcess(String taskId) {
-        TaskEntity task = taskRepository.findById(taskId).orElseThrow();
+    /**
+     * Выполнить задачу
+     * @param task Задача
+     */
+    private void processTask(Task task) {
         if (task.getStatus() != TaskStatus.PROCESSING) {
             // Уже обрабатывается или завершена – тихо выходим
             return;
@@ -133,7 +144,11 @@ public class TaskService {
         }
     }
 
-    private void sendUpdate(TaskEntity task) {
+    /**
+     * Отправить изменение по задаче через WebSocket пользователю
+     * @param task Задача
+     */
+    private void sendUpdate(Task task) {
         TaskResponse response = new TaskResponse(
                 task.getId(), task.getStatus(), task.getProgress(),
                 task.getPayload(), task.getResult(),
@@ -141,24 +156,5 @@ public class TaskService {
         );
         String json = objectMapper.writeValueAsString(response);
         wsManager.sendToUser(task.getUserId().toString(), json);
-    }
-
-    public List<TaskResponse> getUserTasks(UUID userId) {
-        return taskRepository.findByUserId(userId).stream()
-                .map(t -> new TaskResponse(
-                        t.getId(), t.getStatus(), t.getProgress(),
-                        t.getPayload(), t.getResult(),
-                        t.getCreatedAt(), t.getCompletedAt()))
-                .collect(Collectors.toList());
-    }
-
-    public TaskResponse getTask(UUID userId, String taskId) {
-        TaskEntity t = taskRepository.findById(taskId)
-                .filter(task -> task.getUserId().equals(userId))
-                .orElseThrow(() -> new RuntimeException("Task not found"));
-        return new TaskResponse(
-                t.getId(), t.getStatus(), t.getProgress(),
-                t.getPayload(), t.getResult(),
-                t.getCreatedAt(), t.getCompletedAt());
     }
 }
