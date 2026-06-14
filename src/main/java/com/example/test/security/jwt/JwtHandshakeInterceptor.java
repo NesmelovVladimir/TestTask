@@ -1,7 +1,9 @@
 package com.example.test.security.jwt;
 
-import com.example.test.entity.UserEntity;
-import com.example.test.repository.UserRepository;
+import com.example.test.dto.UserDTO;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
@@ -12,36 +14,32 @@ import org.springframework.web.socket.server.HandshakeInterceptor;
 
 import java.util.Map;
 
+@RequiredArgsConstructor
+@Slf4j
 @Component
 public class JwtHandshakeInterceptor implements HandshakeInterceptor {
-    private final JwtTokenProvider tokenProvider;
-    private final UserRepository userRepository;
 
-    public JwtHandshakeInterceptor(JwtTokenProvider tokenProvider, UserRepository userRepository) {
-        this.tokenProvider = tokenProvider;
-        this.userRepository = userRepository;
-    }
+    private final JwtTokenProvider tokenProvider;
 
     @Override
-    public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
-            WebSocketHandler wsHandler, Map<String, Object> attributes) {
+    public boolean beforeHandshake(@NonNull ServerHttpRequest request, @NonNull ServerHttpResponse response,
+            @NonNull WebSocketHandler wsHandler, @NonNull Map<String, Object> attributes) {
         if (request instanceof ServletServerHttpRequest servletRequest) {
             String token = servletRequest.getServletRequest().getParameter("token");
             if (token != null && tokenProvider.validateToken(token)) {
-                String username = tokenProvider.getUsername(token);
-                UserEntity user = userRepository.findByUsername(username).orElse(null);
-                if (user != null) {
-                    attributes.put("userId", user.getId());  // теперь ID пользователя
-                    return true;
-                }
+                UserDTO userByToken = tokenProvider.getUserByToken(token);
+                attributes.put("userId", userByToken.getId());  // теперь ID пользователя
+                return true;
             }
         }
         return false; // отклонить подключение
     }
 
     @Override
-    public void afterHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler wsHandler,
-            @Nullable Exception exception) {
-
+    public void afterHandshake(@NonNull ServerHttpRequest request, @NonNull ServerHttpResponse response,
+            @NonNull WebSocketHandler wsHandler, @Nullable Exception exception) {
+        if (exception != null) {
+            log.error("Connection error", exception);
+        }
     }
 }

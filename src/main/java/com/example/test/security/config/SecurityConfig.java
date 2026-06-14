@@ -1,10 +1,10 @@
 package com.example.test.security.config;
 
-import com.example.test.repository.UserRepository;
 import com.example.test.security.jwt.JwtAuthenticationFilter;
 import com.example.test.security.jwt.JwtTokenProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -22,12 +22,11 @@ import java.util.List;
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
-    private final JwtTokenProvider tokenProvider;
-    private final UserRepository userRepository;
 
-    public SecurityConfig(JwtTokenProvider tokenProvider, UserRepository userRepository) {
+    private final JwtTokenProvider tokenProvider;
+
+    public SecurityConfig(JwtTokenProvider tokenProvider) {
         this.tokenProvider = tokenProvider;
-        this.userRepository = userRepository;
     }
 
     @Bean
@@ -41,7 +40,7 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .addFilterBefore(new JwtAuthenticationFilter(tokenProvider, userRepository),
+                .addFilterBefore(new JwtAuthenticationFilter(tokenProvider),
                         UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

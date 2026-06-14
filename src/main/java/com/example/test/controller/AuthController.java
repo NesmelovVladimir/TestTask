@@ -2,9 +2,9 @@ package com.example.test.controller;
 
 import com.example.test.dto.AuthRequest;
 import com.example.test.dto.AuthResponse;
+import com.example.test.entity.User;
 import com.example.test.security.jwt.JwtTokenProvider;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -30,16 +30,16 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@RequestBody AuthRequest request) {
-        UserDetails userDetails;
+        User userDetails;
         try {
-            userDetails = userDetailsService.loadUserByUsername(request.getUsername());
+            userDetails = (User) userDetailsService.loadUserByUsername(request.getUsername());
         } catch (UsernameNotFoundException _) {
             return ResponseEntity.status(401).build();
         }
         if (!passwordEncoder.matches(request.getPassword(), userDetails.getPassword())) {
             return ResponseEntity.status(401).build();
         }
-        String token = tokenProvider.createToken(userDetails.getUsername());
+        String token = tokenProvider.createToken(userDetails);
         return ResponseEntity.ok(new AuthResponse(token));
     }
 }

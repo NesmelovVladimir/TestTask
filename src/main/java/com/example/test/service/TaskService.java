@@ -2,13 +2,13 @@ package com.example.test.service;
 
 import com.example.test.dto.TaskResponse;
 import com.example.test.dto.TaskStatus;
+import com.example.test.dto.UserDTO;
 import com.example.test.entity.TaskEntity;
-import com.example.test.entity.UserEntity;
 import com.example.test.repository.TaskRepository;
-import com.example.test.repository.UserRepository;
 import com.example.test.websocket.WebSocketSessionManager;
+import jakarta.annotation.Resource;
 import jakarta.transaction.Transactional;
-import org.springframework.beans.factory.annotation.Qualifier;
+import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -20,35 +20,28 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
+/**
+ * Сервис для работы с задачами
+ */
+@RequiredArgsConstructor
 @Service
 public class TaskService {
 
     private final TaskRepository taskRepository;
-    private final UserRepository userRepository;
     private final WebSocketSessionManager wsManager;
     private final ObjectMapper objectMapper;
+    @Resource(name = "taskExecutor")
     private final Executor taskExecutor;
 
     private final Object schedulingLock = new Object();
 
-    public TaskService(TaskRepository taskRepository,
-            UserRepository userRepository,
-            WebSocketSessionManager wsManager,
-            ObjectMapper objectMapper,
-            @Qualifier("taskExecutor") Executor taskExecutor) {
-        this.taskRepository = taskRepository;
-        this.userRepository = userRepository;
-        this.wsManager = wsManager;
-        this.objectMapper = objectMapper;
-        this.taskExecutor = taskExecutor;
-    }
-
-
-    // 1. Только создаёт задачу, не запускает обработку
-    public TaskEntity createTask(String username, String payload) {
-        UserEntity user = userRepository.findById(UUID.fromString(username))
-                .orElseThrow(() -> new RuntimeException("User not found"));
-
+    /**
+     * Отправить задачу пользователя в очередь на выполнение
+     * @param user    Пользователь, создавший задачу
+     * @param payload Нагрузка для задачи
+     * @return Новая задача
+     */
+    public TaskEntity createTask(UserDTO user, String payload) {
         TaskEntity task = new TaskEntity();
         task.setId(UUID.randomUUID().toString().substring(0, 8));
         task.setUserId(user.getId());
@@ -150,8 +143,8 @@ public class TaskService {
         wsManager.sendToUser(task.getUserId().toString(), json);
     }
 
-    public List<TaskResponse> getUserTasks(String userId) {
-        return taskRepository.findByUserId(UUID.fromString(userId)).stream()
+    public List<TaskResponse> getUserTasks(UUID userId) {
+        return taskRepository.findByUserId(userId).stream()
                 .map(t -> new TaskResponse(
                         t.getId(), t.getStatus(), t.getProgress(),
                         t.getPayload(), t.getResult(),
@@ -159,7 +152,7 @@ public class TaskService {
                 .collect(Collectors.toList());
     }
 
-    public TaskResponse getTask(String userId, String taskId) {
+    public TaskResponse getTask(UUID userId, String taskId) {
         TaskEntity t = taskRepository.findById(taskId)
                 .filter(task -> task.getUserId().equals(userId))
                 .orElseThrow(() -> new RuntimeException("Task not found"));
