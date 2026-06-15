@@ -85,7 +85,6 @@ public class TaskService {
             List<Task> pendingTasks = taskRepository.findAllByStatusOrderByCreatedAt(TaskStatus.CREATED,
                     Pageable.ofSize(5));
 
-            log.info("{} tasks pending", pendingTasks.size());
             CompletableFuture<?>[] tasks = pendingTasks.stream()
                     .map(task -> {
                         task.setStatus(TaskStatus.PROCESSING);
